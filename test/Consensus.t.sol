@@ -21,8 +21,8 @@ contract ConsensusTest is Test {
         signers[0] = signer1;
         signers[1] = signer2;
         signers[2] = signer3;
-        verifier = new QuorumVerifier(signers, 2);
-        consensus = new LLMDeliberativeConsensus(verifier, 0.1 ether);
+        verifier = new QuorumVerifier(signers, 2, address(this));
+        consensus = new LLMDeliberativeConsensus(verifier, 0.1 ether, 1 days, 100, address(this));
     }
 
     function _sign(bytes32 digest, uint256 pk) internal pure returns (bytes memory) {
@@ -42,19 +42,21 @@ contract ConsensusTest is Test {
 
     function testFinalizeWithQuorum() public {
         uint256 id = consensus.submitProposal{value: 0.1 ether}(keccak256("batch1"));
-        bytes32 inputHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(123)), address(this)));
+        uint64 epoch = consensus.currentEpoch();
+        bytes32 inputHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(123)), address(this), epoch));
 
         bytes memory proof = _concat(_sign(inputHash, pk1), _sign(inputHash, pk2));
         consensus.finalizeProposal(id, bytes32(uint256(123)), proof);
 
-        (,,,, bytes32 decision) = consensus.proposals(id);
+        (,,,,,, , , bytes32 decision) = consensus.proposals(id);
         assertEq(decision, bytes32(uint256(123)));
     }
 
     function testFinalizeFailsWithBadSig() public {
         uint256 id = consensus.submitProposal{value: 0.1 ether}(keccak256("batch1"));
-        bytes32 inputHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(123)), address(this)));
-        bytes32 wrongHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(321)), address(this)));
+        uint64 epoch = consensus.currentEpoch();
+        bytes32 inputHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(123)), address(this), epoch));
+        bytes32 wrongHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(321)), address(this), epoch));
 
         bytes memory proof = _concat(_sign(wrongHash, pk1), _sign(wrongHash, pk2));
         vm.expectRevert(LLMDeliberativeConsensus.InvalidProof.selector);
@@ -63,7 +65,8 @@ contract ConsensusTest is Test {
 
     function testDuplicateSignaturesDoNotCountTwice() public {
         uint256 id = consensus.submitProposal{value: 0.1 ether}(keccak256("batch1"));
-        bytes32 inputHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(123)), address(this)));
+        uint64 epoch = consensus.currentEpoch();
+        bytes32 inputHash = keccak256(abi.encodePacked(keccak256("batch1"), bytes32(uint256(123)), address(this), epoch));
 
         // Only signer1 signs, duplicated twice
         bytes memory proof = _concat(_sign(inputHash, pk1), _sign(inputHash, pk1));

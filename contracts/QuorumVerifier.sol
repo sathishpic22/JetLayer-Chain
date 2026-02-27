@@ -8,20 +8,34 @@ import "./LLMDeliberativeConsensus.sol";
 /// Signers must be in the authorized set and unique; ordering does not matter.
 contract QuorumVerifier is IProofVerifier {
     mapping(address => uint8) public signerIndex; // 1-based index
-    uint256 public immutable threshold;
-    uint256 public immutable signerCount;
+    address public governor;
+    uint256 public threshold;
+    uint256 public signerCount;
+    address[] public signerSet;
 
-    constructor(address[] memory signers, uint256 _threshold) {
-        require(signers.length > 0, "no signers");
-        require(_threshold > 0 && _threshold <= signers.length, "bad threshold");
-        threshold = _threshold;
-        signerCount = signers.length;
-        for (uint256 i = 0; i < signers.length; i++) {
-            address s = signers[i];
-            require(s != address(0), "zero signer");
-            require(signerIndex[s] == 0, "duplicate signer");
-            signerIndex[s] = uint8(i + 1);
-        }
+    event SignerSetUpdated(address[] signers, uint256 threshold);
+    event GovernorUpdated(address indexed oldGovernor, address indexed newGovernor);
+
+    error NotGovernor();
+    error BadThreshold();
+
+    constructor(address[] memory signers, uint256 _threshold, address governor_) {
+        _setSignerSet(signers, _threshold);
+        governor = governor_;
+    }
+
+    modifier onlyGovernor() {
+        if (msg.sender != governor) revert NotGovernor();
+        _;
+    }
+
+    function setGovernor(address newGovernor) external onlyGovernor {
+        emit GovernorUpdated(governor, newGovernor);
+        governor = newGovernor;
+    }
+
+    function updateSignerSet(address[] memory signers, uint256 _threshold) external onlyGovernor {
+        _setSignerSet(signers, _threshold);
     }
 
     /// @dev Verifies that at least `threshold` unique authorized signers signed `inputHash`.
@@ -54,5 +68,28 @@ contract QuorumVerifier is IProofVerifier {
             if (approvals >= threshold) return true;
         }
         return false;
+    }
+
+    function _setSignerSet(address[] memory signers, uint256 _threshold) internal {
+        if (signers.length == 0) revert BadThreshold();
+        if (_threshold == 0 || _threshold > signers.length) revert BadThreshold();
+
+        // Clear old index mapping
+        for (uint256 i = 0; i < signerSet.length; i++) {
+            delete signerIndex[signerSet[i]];
+        }
+
+        signerSet = signers;
+        threshold = _threshold;
+        signerCount = signers.length;
+
+        for (uint256 i = 0; i < signers.length; i++) {
+            address s = signers[i];
+            require(s != address(0), "zero signer");
+            require(signerIndex[s] == 0, "duplicate signer");
+            signerIndex[s] = uint8(i + 1);
+        }
+
+        emit SignerSetUpdated(signers, _threshold);
     }
 }
